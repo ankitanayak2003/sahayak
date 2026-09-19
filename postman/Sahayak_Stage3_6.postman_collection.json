@@ -1,0 +1,120 @@
+{
+  "info": {
+    "name": "Sahayak Stage 3-6 Demo",
+    "description": "Demo collection for the implemented volunteer, request, emergency, notification-producing, and DTMF workflow. Uses only currently mounted endpoints. Voice webhook is provider-neutral and does not call a real telephony provider.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api/v1" },
+    { "key": "policeEmail", "value": "" },
+    { "key": "policePassword", "value": "" },
+    { "key": "volunteerEmail", "value": "" },
+    { "key": "volunteerPassword", "value": "" },
+    { "key": "policeAccessToken", "value": "" },
+    { "key": "volunteerAccessToken", "value": "" },
+    { "key": "volunteerId", "value": "" },
+    { "key": "requestId", "value": "" },
+    { "key": "emergencyId", "value": "" },
+    { "key": "callSid", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "01 Demo Setup",
+      "item": [
+        { "name": "Login Police Admin", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "description": "Log in an existing police_admin account and save the access token. Create the account temporarily through a controlled MongoDB setup script if needed; do not commit credentials.", "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{policeEmail}}\",\n  \"password\": \"{{policePassword}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/auth/login" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Police login succeeds', function () { pm.response.to.have.status(200); });", "pm.environment.set('policeAccessToken', pm.response.json().data.accessToken);"] } }] },
+        { "name": "Login Volunteer", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "description": "Log in an existing volunteer account and save the access token.", "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{volunteerEmail}}\",\n  \"password\": \"{{volunteerPassword}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/auth/login" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Volunteer login succeeds', function () { pm.response.to.have.status(200); });", "pm.environment.set('volunteerAccessToken', pm.response.json().data.accessToken);"] } }] }
+      ]
+    },
+    {
+      "name": "02 Volunteer",
+      "item": [
+        { "name": "Get Volunteer Profile", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }], "description": "Volunteer reads their own profile; ownership is resolved through volunteers.user_id and req.user.id.", "url": "{{baseUrl}}/volunteers/{{volunteerId}}" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Profile succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Verify Volunteer", "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Police admin verifies a volunteer. Expected status: 200.", "body": { "mode": "raw", "raw": "{\n  \"verification_status\": \"verified\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/volunteers/{{volunteerId}}/verification" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Verification succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Set Volunteer Available", "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Volunteer updates only their own availability.", "body": { "mode": "raw", "raw": "{\n  \"is_available\": true\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/volunteers/{{volunteerId}}/availability" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Availability succeeds', function () { pm.response.to.have.status(200); });"] } }] }
+      ]
+    },
+    {
+      "name": "03 Requests",
+      "item": [
+        { "name": "Create Normal Request", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Police admin creates a routine request. Expected status: 201.", "body": { "mode": "raw", "raw": "{\n  \"category\": \"medicine\",\n  \"urgency_level\": \"routine\",\n  \"ai_confidence\": 0.95,\n  \"description\": \"Needs medicine delivery\",\n  \"source_channel\": \"app\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/requests" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Request created', function () { pm.response.to.have.status(201); });", "pm.environment.set('requestId', pm.response.json().data.requestId);"] } }] },
+        { "name": "Assign Request", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Police admin assigns a verified, available volunteer.", "body": { "mode": "raw", "raw": "{\n  \"volunteer_id\": \"{{volunteerId}}\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/requests/{{requestId}}/assign" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Assignment succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Accept Request", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }], "description": "Only the assigned volunteer can accept the request.", "url": "{{baseUrl}}/requests/{{requestId}}/accept" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Acceptance succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Update Request Status", "request": { "method": "PATCH", "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Assigned volunteer progresses the request; history is recorded.", "body": { "mode": "raw", "raw": "{\n  \"status\": \"in_progress\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/requests/{{requestId}}/status" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Status update succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Get Request History", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }], "description": "Reads the audit history for the assigned request.", "url": "{{baseUrl}}/requests/{{requestId}}/history" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('History succeeds', function () { pm.response.to.have.status(200); });"] } }] }
+      ]
+    },
+    {
+      "name": "04 Emergency",
+      "item": [
+        { "name": "Create Critical Request", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Critical requests are escalated by the deterministic decision service and are not assignable to volunteers.", "body": { "mode": "raw", "raw": "{\n  \"category\": \"fall\",\n  \"urgency_level\": \"critical\",\n  \"ai_confidence\": 0.99,\n  \"description\": \"Caller reports a fall\",\n  \"source_channel\": \"app\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/requests" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Critical request created', function () { pm.response.to.have.status(201); });"] } }] },
+        { "name": "List Emergencies", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }], "description": "Police admin lists emergency escalations.", "url": "{{baseUrl}}/emergencies" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Emergency list succeeds', function () { pm.response.to.have.status(200); });", "const items = pm.response.json().data.emergencies || []; if (items.length) pm.environment.set('emergencyId', items[0]._id);"] } }] },
+        { "name": "Acknowledge Emergency", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }], "description": "Police admin records human acknowledgement.", "url": "{{baseUrl}}/emergencies/{{emergencyId}}/acknowledge" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Acknowledgement succeeds', function () { pm.response.to.have.status(200); });"] } }] },
+        { "name": "Resolve Emergency", "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }], "description": "Police admin resolves the escalation. Sahayak never automatically calls 112.", "body": { "mode": "raw", "raw": "{\n  \"resolution_status\": \"resolved\",\n  \"notes\": \"Handled by duty officer\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/emergencies/{{emergencyId}}/resolve" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Resolution succeeds', function () { pm.response.to.have.status(200); });"] } }] }
+      ]
+    },
+    {
+      "name": "05 Voice and DTMF",
+      "item": [
+        { "name": "DTMF Voice Webhook", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "description": "Provider-neutral DTMF webhook. Digit 4 creates a critical request and emergency escalation. No real telephony provider is integrated.", "body": { "mode": "raw", "raw": "{\n  \"call_sid\": \"{{callSid}}\",\n  \"caller_phone\": \"+919999999999\",\n  \"dtmf\": \"4\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/voice/webhook" }, "event": [{ "listen": "prerequest", "script": { "type": "text/javascript", "exec": ["pm.environment.set('callSid', 'postman-call-' + Date.now());"] } }, { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Voice webhook succeeds', function () { pm.expect([200, 201]).to.include(pm.response.code); });"] } }] },
+        { "name": "Duplicate DTMF Webhook", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "description": "Repeating the same call_sid is idempotent and does not create a duplicate request.", "body": { "mode": "raw", "raw": "{\n  \"call_sid\": \"{{callSid}}\",\n  \"caller_phone\": \"+919999999999\",\n  \"dtmf\": \"4\"\n}", "options": { "raw": { "language": "json" } } }, "url": "{{baseUrl}}/voice/webhook" }, "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Duplicate webhook is idempotent', function () { pm.response.to.have.status(200); });"] } }] }
+      ]
+    },
+    {
+      "name": "06 Negative Validation and Authorization",
+      "item": [
+        {
+          "name": "Missing Token Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Expected 401 for an unauthenticated protected request.",
+            "url": "{{baseUrl}}/requests"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Missing token returns 401', function () { pm.response.to.have.status(401); });"] } }]
+        },
+        {
+          "name": "Invalid Category",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{policeAccessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "description": "Expected 400 for a category outside the existing request category set.",
+            "body": { "mode": "raw", "raw": "{\n  \"category\": \"not-a-category\",\n  \"urgency_level\": \"routine\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/requests"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Invalid category returns 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "Invalid Request ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }],
+            "description": "Expected controlled 400 for a malformed MongoDB request ID.",
+            "url": "{{baseUrl}}/requests/not-an-object-id"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Malformed request ID is controlled', function () { pm.expect([400, 404]).to.include(pm.response.code); });"] } }]
+        },
+        {
+          "name": "Invalid DTMF",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "description": "Expected 400 for an unsupported keypad command.",
+            "body": { "mode": "raw", "raw": "{\n  \"call_sid\": \"negative-call-{{$guid}}\",\n  \"caller_phone\": \"+919999999999\",\n  \"dtmf\": \"9\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/voice/webhook"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Invalid DTMF returns 400', function () { pm.response.to.have.status(400); });"] } }]
+        },
+        {
+          "name": "Audit State Fields",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{volunteerAccessToken}}" }],
+            "description": "Checks that the request history response contains previous_state and new_state fields for state-changing events.",
+            "url": "{{baseUrl}}/requests/{{requestId}}/history"
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('History exposes state transition fields', function () { const history = pm.response.json().data.history || []; pm.expect(history.length).to.be.above(0); history.filter(function (event) { return ['REQUEST_ASSIGNED', 'REQUEST_ACCEPTED', 'REQUEST_STATUS_CHANGED'].includes(event.action); }).forEach(function (event) { pm.expect(event).to.have.property('previous_state'); pm.expect(event).to.have.property('new_state'); }); });"] } }]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,624 @@
+{
+  "info": {
+    "name": "Sahayak Backend Authentication",
+    "description": "Evaluator-ready collection for the six currently implemented Sahayak API routes. RBAC middleware is implemented and independently verified, but no protected business endpoint is currently mounted. HTTP-level RBAC tests will be added when corresponding business routes are implemented.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 Health",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "Public health check. No authentication is required. Expected status: 200. Redis availability is reported separately by the current implementation.",
+            "url": "{{baseUrl}}/health"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Response is successful', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "pm.test('Health data is present', function () { const data = pm.response.json().data; pm.expect(data.application).to.exist; pm.expect(data.server).to.exist; pm.expect(data.database).to.exist; });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Volunteer Registration",
+      "item": [
+        {
+          "name": "Generate OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Development-only OTP endpoint. Do not use this response pattern in production. No authentication is required in development. Expected status: 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"{{testPhone}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/volunteers/generate-otp"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const suffix = String(Date.now()) + String(Math.floor(Math.random() * 1000));",
+                  "pm.environment.set('testName', 'Postman Test Volunteer');",
+                  "pm.environment.set('testEmail', 'postman_' + suffix + '@example.com');",
+                  "pm.environment.set('testPhone', '1202' + suffix.slice(-7));",
+                  "pm.environment.set('testPassword', 'Postman_Dev_Password_123!');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('OTP response is successful', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "pm.test('Development OTP and expiry metadata exist', function () { const data = pm.response.json().data; pm.expect(data.otp).to.be.a('string').and.not.empty; pm.expect(data.expiresInSeconds).to.exist; pm.environment.set('otp', data.otp); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Volunteer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Registers a temporary volunteer using the development OTP. No authentication is required. Expected status: 201. The backend hashes the password and encrypts the phone number before storage.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{testName}}\",\n  \"phone_number\": \"{{testPhone}}\",\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"otp\": \"{{otp}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/volunteers/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () { pm.response.to.have.status(201); });",
+                  "pm.test('Registration is successful', function () { pm.expect(pm.response.json().success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate OTP for Duplicate Registration",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Generates a second development OTP for duplicate-email validation using a new temporary phone number.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"{{duplicatePhone}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/volunteers/generate-otp"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const suffix = String(Date.now()) + String(Math.floor(Math.random() * 1000));",
+                  "pm.environment.set('duplicatePhone', '1202' + suffix.slice(-7));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Duplicate-test OTP exists', function () { const data = pm.response.json().data; pm.expect(data.otp).to.be.a('string').and.not.empty; pm.environment.set('duplicateOtp', data.otp); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate Registration",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Attempts registration with the existing temporary email and a new temporary phone. Expected status: 409. Clean up temporary accounts manually after the collection run; no cleanup API exists.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Duplicate Postman Volunteer\",\n  \"phone_number\": \"{{duplicatePhone}}\",\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"otp\": \"{{duplicateOtp}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/volunteers/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 409', function () { pm.response.to.have.status(409); });",
+                  "pm.test('Duplicate registration is unsuccessful', function () { pm.expect(pm.response.json().success).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Authentication",
+      "item": [
+        {
+          "name": "Login Success",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Logs in the temporary active volunteer. On success the backend issues a short-lived JWT access token and a refresh token. The raw refresh token is returned to the client but only its hash is stored by the backend.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Login is successful', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); });",
+                  "pm.test('Safe authentication fields exist', function () { const data = pm.response.json().data; pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(data.userId).to.exist; pm.expect(data.role).to.exist; pm.expect(data.account_status).to.exist; pm.environment.set('accessToken', data.accessToken); pm.environment.set('refreshToken', data.refreshToken); });",
+                  "pm.test('Sensitive fields are absent', function () { const text = JSON.stringify(pm.response.json()).toLowerCase(); ['password_hash', 'phone_number_encrypted', 'phone_number_blind_index', 'jwt_secret'].forEach(function (field) { pm.expect(text).not.to.include(field); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Attempts login with the temporary email and an incorrect password. Expected status: 401 with no access or refresh token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"DefinitelyWrongPassword_123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('Login is unsuccessful', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(false); pm.expect(json.data).to.not.exist; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Credentials",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Validates missing login credentials. Expected status: 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 400', function () { pm.response.to.have.status(400); });",
+                  "pm.test('Validation is unsuccessful', function () { pm.expect(pm.response.json().success).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Refresh Tokens",
+      "item": [
+        {
+          "name": "Refresh Success (A to B)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Rotates the login refresh token A into refresh token B. Expected status: 200. The prior token is saved before variables are updated.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.environment.set('oldRefreshToken', pm.environment.get('refreshToken')); "]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Rotation returns new tokens', function () { const data = pm.response.json().data; pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).not.to.eql(pm.environment.get('oldRefreshToken')); pm.environment.set('accessToken', data.accessToken); pm.environment.set('refreshToken', data.refreshToken); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Again / Rotation (B to C)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Rotates refresh token B into C before replay testing. Expected status: 200. Token B is saved as oldRefreshToken for the later reuse test.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.environment.set('oldRefreshToken', pm.environment.get('refreshToken')); "]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Second rotation returns a different token', function () { const data = pm.response.json().data; pm.expect(data.accessToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.expect(data.refreshToken).not.to.eql(pm.environment.get('oldRefreshToken')); pm.environment.set('accessToken', data.accessToken); pm.environment.set('refreshToken', data.refreshToken); pm.environment.set('secondRefreshToken', data.refreshToken); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reuse Revoked Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Expected security behavior: replaying previously rotated refresh token B triggers refresh-token family revocation. Expected status: 401. No token is issued.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{oldRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('Replay returns no token pair', function () { const data = pm.response.json().data; pm.expect(data).to.not.exist; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Submits a random-looking unknown refresh token. Expected status: 401 with no token response.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{unknownRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.environment.set('unknownRefreshToken', pm.variables.replaceIn('{{$guid}}')); "]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('Unknown token returns no token pair', function () { pm.expect(pm.response.json().data).to.not.exist; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Validates the current missing-refresh-token behavior. Expected status: 401 according to the current auth route.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('Missing token is unsuccessful', function () { pm.expect(pm.response.json().success).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Logout",
+      "item": [
+        {
+          "name": "Login for Logout Test",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Starts a fresh login session for logout testing because replaying a revoked refresh token triggers family revocation. Expected status: 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Logout refresh token saved', function () { const data = pm.response.json().data; pm.expect(data.refreshToken).to.be.a('string').and.not.empty; pm.environment.set('logoutRefreshToken', data.refreshToken); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout Active Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Revokes only the supplied refresh token. Expected status: 200. No access or refresh token is issued.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{logoutRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () { pm.response.to.have.status(200); });",
+                  "pm.test('Logout is successful', function () { const json = pm.response.json(); pm.expect(json.success).to.eql(true); pm.expect(json.data.message).to.eql('Logout successful.'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh After Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Confirms that a logged-out refresh token cannot be used for refresh. Expected status: 401.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{logoutRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/refresh"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 401', function () { pm.response.to.have.status(401); });",
+                  "pm.test('No token pair is returned', function () { pm.expect(pm.response.json().data).to.not.exist; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeated Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Repeats logout with an already revoked token. Logout is idempotent and returns the same generic success response. Expected status: 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{logoutRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status code is 200', function () { pm.response.to.have.status(200); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown Logout Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Submits an unknown refresh token to logout. Token existence is not disclosed. Expected status: 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{unknownRefreshToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status code is 200', function () { pm.response.to.have.status(200); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid Logout Input",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Validates missing logout input. Expected status: 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status code is 400', function () { pm.response.to.have.status(400); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid Logout Token Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "description": "Validates a non-string refreshToken. Expected status: 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": 12345\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('Status code is 400', function () { pm.response.to.have.status(400); });"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
