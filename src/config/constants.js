@@ -18,8 +18,11 @@ const ROLES = {
   POLICE_ADMIN: 'police_admin',
 };
 
+const EMERGENCY_TYPES = ['medical', 'fire', 'accident', 'crime', 'safety_threat', 'other'];
+
 module.exports = {
   API_PREFIX,
+  EMERGENCY_TYPES,
   ROLES,
   STATUS,
 };

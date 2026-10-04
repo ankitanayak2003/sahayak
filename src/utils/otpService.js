@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { normalizePhoneNumber } = require('./phoneSecurity');
 
 const OTP_TTL_MS = 5 * 60 * 1000;
+const MAX_OTP_ATTEMPTS = 5;
 const otpStore = new Map();
 
 function buildOtpKey(phoneNumber) {
@@ -22,13 +23,20 @@ function generateOtpForPhone(phoneNumber) {
     otp,
     expiresAt: Date.now() + OTP_TTL_MS,
     used: false,
+    attempts: 0,
   });
 
   return otp;
 }
 
 function verifyOtpForPhone(phoneNumber, submittedOtp) {
-  const key = buildOtpKey(phoneNumber);
+  let key;
+  try {
+    key = buildOtpKey(phoneNumber);
+  } catch {
+    return false;
+  }
+
   const record = otpStore.get(key);
 
   if (!record) {
@@ -41,6 +49,10 @@ function verifyOtpForPhone(phoneNumber, submittedOtp) {
   }
 
   if (record.otp !== String(submittedOtp).trim()) {
+    record.attempts = (record.attempts || 0) + 1;
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+      otpStore.delete(key);
+    }
     return false;
   }
 
@@ -53,4 +65,5 @@ module.exports = {
   generateOtpForPhone,
   verifyOtpForPhone,
   OTP_TTL_MS,
+  MAX_OTP_ATTEMPTS,
 };

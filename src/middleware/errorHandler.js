@@ -22,11 +22,16 @@ function errorHandler(err, req, res, next) {
 
   logger.error(`${req.method} ${req.originalUrl} -> ${err.message}`);
 
+  const isProduction = env.NODE_ENV === 'production';
+  const errorMessage = isProduction && statusCode >= 500
+    ? 'Internal Server Error'
+    : (err.message || 'Internal Server Error');
+
   res.status(statusCode).json({
     success: false,
-    error: err.message || 'Internal Server Error',
+    error: errorMessage,
     // Stack trace only in development, never in production responses.
-    ...(env.NODE_ENV === 'development' && { stack: err.stack }),
+    ...(!isProduction && { stack: err.stack }),
   });
 }
 

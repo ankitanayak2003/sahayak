@@ -78,14 +78,40 @@ Expected response:
   "data": {
     "application": "ok",
     "server": "ok",
-    "database": "ok",
+    "database": "connected",
     "redis": "ok",
     "timestamp": "2026-09-18T10:00:00.000Z"
   }
 }
 ```
 
-If PostgreSQL or Redis are not running, `database`/`redis` will show `"unavailable"` or `"disconnected"` instead - the request will still return HTTP 200.
+If Redis is not running, `redis` will show `"disconnected"` instead — the request will still return HTTP 200.
+
+## Sarvam Hosted Voice Agent Architecture
+
+Sahayak uses the **Sarvam hosted Voice Agent** as the complete voice layer:
+- **Exotel** routes caller telephony directly to the Sarvam hosted Voice Agent channel:
+  `https://apps.sarvam.ai/api/app-runtime/channels/exotel`
+- **Sarvam** manages real-time Speech-to-Text (STT), conversational AI (LLM), and Text-to-Speech (TTS) in the cloud.
+- Once the emergency details are collected from the caller, the Sarvam Voice Agent executes a tool/action that calls the Sahayak webhook:
+  `POST /api/v1/sarvam/emergency`
+- **Sahayak backend** validates the payload, runs Gemini classification, and invokes `requestService` to persist the request in MongoDB and manage volunteer dispatch / 112 escalation.
+
+### Emergency Webhook Contract (`POST /api/v1/sarvam/emergency`)
+- **Headers**:
+  `Authorization: Bearer <SARVAM_TOOL_SHARED_SECRET>`
+  `Content-Type: application/json`
+- **Body**:
+  ```json
+  {
+    "caller_phone": "+919876543210",
+    "interaction_id": "sarvam-interaction-uuid",
+    "emergency_type": "medical",
+    "location": "Sector 4, Main Market, Delhi",
+    "description": "Caller fell and requires urgent medical assistance.",
+    "severity": "high"
+  }
+  ```
 
 ## Project structure
 

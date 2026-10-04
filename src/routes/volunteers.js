@@ -102,20 +102,27 @@ router.post(
       email: normalizedEmail,
       password_hash: passwordHash,
       role: 'volunteer',
-      account_status: 'active',
+      account_status: 'pending',
       created_at: now,
       updated_at: now,
     };
 
     try {
       const result = await users.insertOne(userDoc);
+      await db.collection('volunteers').insertOne({
+        user_id: result.insertedId,
+        verification_status: 'pending',
+        is_available: false,
+        created_at: now,
+        updated_at: now,
+      });
 
       return success(res, 201, {
         success: true,
-        message: 'Volunteer registration successful.',
+        message: 'Volunteer registration submitted for verification.',
         userId: result.insertedId,
         role: 'volunteer',
-        account_status: 'active',
+        account_status: 'pending',
       });
     } catch (error) {
       if (error && error.code === 11000) {

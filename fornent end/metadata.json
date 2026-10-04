@@ -1,0 +1,6 @@
+{
+  "name": "Sahayak - Emergency Assistance System",
+  "description": "Unified emergency response and dispatch web application featuring role-based interfaces for Police/Admin commanders and Field Volunteers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
