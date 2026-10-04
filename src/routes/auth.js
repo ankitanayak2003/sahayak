@@ -7,6 +7,7 @@ const { generateRefreshToken, hashRefreshToken } = require('../utils/refreshToke
 const { getDB, startMongoSession } = require('../config/mongodb');
 const { createPhoneBlindIndex, encryptPhoneNumber, normalizePhoneNumber } = require('../utils/phoneSecurity');
 const { verifyOtpForPhone } = require('../utils/otpService');
+const { loginRateLimiter } = require('../middleware/rateLimiter');
 const { ROLES } = require('../config/constants');
 
 const router = express.Router();
@@ -67,7 +68,7 @@ router.post(
       return error(res, 400, 'Phone number is invalid.');
     }
 
-    const otpValid = verifyOtpForPhone(normalizedPhone, otp.trim());
+    const otpValid = await verifyOtpForPhone(normalizedPhone, otp.trim());
     if (!otpValid) {
       return error(res, 400, 'OTP verification failed or expired.');
     }
@@ -130,6 +131,7 @@ router.post(
 
 router.post(
   '/login',
+  loginRateLimiter,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body || {};
 

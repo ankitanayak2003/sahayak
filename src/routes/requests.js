@@ -6,6 +6,8 @@ const { getDB } = require('../config/mongodb');
 const authenticate = require('../middleware/authenticate');
 const { requireRole } = require('../middleware/requireRole');
 const { ROLES } = require('../config/constants');
+const { citizenSosRateLimiter } = require('../middleware/rateLimiter');
+const { normalizePhoneNumber, isValidPhone } = require('../utils/phoneSecurity');
 const {
   createRequest,
   hasActiveAssignment,
@@ -151,9 +153,41 @@ router.post('/', authenticate, requireRole(ROLES.POLICE_ADMIN), asyncHandler(asy
 }));
 
 // Public citizen emergency intake endpoint (with optional GPS / location coordinates)
-router.post('/citizen', asyncHandler(async (req, res) => {
+router.post('/citizen', citizenSosRateLimiter, asyncHandler(async (req, res) => {
   const body = req.body || {};
   if (!body || typeof body !== 'object' || Array.isArray(body)) return error(res, 400, 'Invalid request body.');
+
+  // Validate description length and type
+  if (body.description !== undefined && body.description !== null) {
+    if (typeof body.description !== 'string') {
+      return error(res, 400, 'Description must be a string.');
+    }
+    if (body.description.trim().length > 500) {
+      return error(res, 400, 'Description must not exceed 500 characters.');
+    }
+  }
+
+  // Validate location text length and type
+  const locationRaw = body.location_text !== undefined ? body.location_text : body.location;
+  if (locationRaw !== undefined && locationRaw !== null) {
+    if (typeof locationRaw !== 'string') {
+      return error(res, 400, 'Location text must be a string.');
+    }
+    if (locationRaw.trim().length > 200) {
+      return error(res, 400, 'Location text must not exceed 200 characters.');
+    }
+  }
+
+  // Validate and normalize optional phone number
+  const rawPhone = body.phone !== undefined ? body.phone : body.senior_citizen_phone;
+  let normalizedPhone = null;
+  if (rawPhone !== undefined && rawPhone !== null && String(rawPhone).trim() !== '') {
+    const phoneStr = String(rawPhone).trim();
+    if (!isValidPhone(phoneStr)) {
+      return error(res, 400, 'Invalid phone number format. Must be a valid 10-15 digit phone number.');
+    }
+    normalizedPhone = normalizePhoneNumber(phoneStr);
+  }
 
   const rawCategory = (body.category || 'emergency').trim().toLowerCase();
   const category = allowedCategories.includes(rawCategory) ? rawCategory : 'emergency';
@@ -163,14 +197,14 @@ router.post('/citizen', asyncHandler(async (req, res) => {
     category,
     urgencyLevel,
     description: typeof body.description === 'string' && body.description.trim() ? body.description.trim() : 'Citizen SOS emergency report.',
-    locationText: body.location_text || body.location || (body.latitude != null && body.longitude != null ? `GPS (${body.latitude}, ${body.longitude})` : 'Unknown Location'),
-    location: body.location || body.location_text,
+    locationText: locationRaw || (body.latitude != null && body.longitude != null ? `GPS (${body.latitude}, ${body.longitude})` : 'Unknown Location'),
+    location: locationRaw,
     latitude: body.latitude !== undefined ? body.latitude : body.lat,
     longitude: body.longitude !== undefined ? body.longitude : body.lng,
     accuracy_meters: body.accuracy_meters !== undefined ? body.accuracy_meters : body.accuracy,
     location_source: body.location_source || body.locationSource || (body.latitude != null ? 'browser_gps' : 'manual_pin'),
     location_captured_at: body.location_captured_at,
-    seniorCitizenPhone: body.phone || body.senior_citizen_phone || null,
+    seniorCitizenPhone: normalizedPhone,
     sourceChannel: 'citizen_web',
     escalationType: category,
   }, { role: 'citizen' });

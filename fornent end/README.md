@@ -1,20 +1,35 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Sahayak Frontend Application
 
-# Run and deploy your AI Studio app
+React 19 + TypeScript Single-Page Application (SPA) for the Sahayak Emergency Assistance Platform.
 
-This contains everything you need to run your app locally.
+## Features
+* **Citizen Emergency Intake Modal**: One-click SOS with optional browser geolocation (`navigator.geolocation`).
+* **Interactive Incident Map**: Leaflet and OpenStreetMap visualization with live radar beacons and accuracy circles.
+* **Police Administration Portal**: Real-time triage, 112 escalation tracking, and volunteer vetting.
+* **Volunteer Portal**: Active assignment management, driving navigation, and task resolution.
 
-View your app in AI Studio: https://ai.studio/apps/9c65ac5d-5adc-484f-8356-425cf0b1b439
+## Local Development
+```bash
+# Install dependencies
+npm install
 
-## Run Locally
+# Configure environment
+cp .env.example .env
+# Set VITE_API_BASE_URL to your backend API URL (default: http://localhost:5000/api/v1)
 
-**Prerequisites:**  Node.js
+# Start development server
+npm run dev
 
+# Lint & Typecheck
+npm run lint
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+# Production Build
+npm run build
+```
+
+## Vercel Deployment
+* **Framework Preset**: Vite
+* **Root Directory**: `fornent end`
+* **Build Command**: `npm run build`
+* **Output Directory**: `dist`
+* **Environment Variables**: Set `VITE_API_BASE_URL` in Vercel project settings to your deployed backend API URL.

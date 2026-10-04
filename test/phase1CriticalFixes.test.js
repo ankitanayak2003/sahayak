@@ -292,19 +292,19 @@ test('FIX 9: normalizePhoneNumber throws on non-digit or empty callerPhone', () 
 
 const { verifyOtpForPhone } = require('../src/utils/otpService');
 
-test('FIX 4: OTP verification service validates and invalidates used OTPs', () => {
+test('FIX 4: OTP verification service validates and invalidates used OTPs', async () => {
   const phone = '9876543210';
-  const otp = generateOtpForPhone(phone);
+  const otp = await generateOtpForPhone(phone);
   assert.equal(otp.length, 6);
 
   // Wrong OTP fails
-  assert.equal(verifyOtpForPhone(phone, '000000'), false);
+  assert.equal(await verifyOtpForPhone(phone, '000000'), false);
 
   // Correct OTP succeeds
-  assert.equal(verifyOtpForPhone(phone, otp), true);
+  assert.equal(await verifyOtpForPhone(phone, otp), true);
 
   // Reusing same OTP fails immediately
-  assert.equal(verifyOtpForPhone(phone, otp), false);
+  assert.equal(await verifyOtpForPhone(phone, otp), false);
 });
 
 // --------------------------------------------------------------------------

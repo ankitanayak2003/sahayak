@@ -14,7 +14,6 @@ require('dotenv').config({ override: true });
 const REQUIRED_VARS = [
   'PORT',
   'DATABASE_URL',
-  'REDIS_URL',
   'MONGODB_URI',
   'MONGODB_DB_NAME',
   'JWT_SECRET',
@@ -28,6 +27,11 @@ const REQUIRED_VARS = [
 
 function validateEnv() {
   const missing = REQUIRED_VARS.filter((key) => !process.env[key]);
+
+  // REDIS_URL is required only when REDIS_REQUIRED is true.
+  if (process.env.REDIS_REQUIRED === 'true' && !process.env.REDIS_URL) {
+    missing.push('REDIS_URL (required when REDIS_REQUIRED=true)');
+  }
 
   if (missing.length > 0) {
     // Thrown (not just logged) so the server never starts in a half-configured state.
@@ -44,7 +48,7 @@ const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: Number(process.env.PORT),
   DATABASE_URL: process.env.DATABASE_URL,
-  REDIS_URL: process.env.REDIS_URL,
+  REDIS_URL: process.env.REDIS_URL || null,
   MONGODB_URI: process.env.MONGODB_URI,
   MONGODB_DB_NAME: process.env.MONGODB_DB_NAME,
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

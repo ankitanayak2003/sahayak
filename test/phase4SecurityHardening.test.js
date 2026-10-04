@@ -18,42 +18,42 @@ test('FIX 18: Dummy hash verification produces safe false match without crashing
 // FIX 19: OTP BRUTE FORCE PROTECTION
 // --------------------------------------------------------------------------
 
-test('FIX 19: OTP lockout enforces MAX_OTP_ATTEMPTS and invalidates OTP after too many failures', () => {
+test('FIX 19: OTP lockout enforces MAX_OTP_ATTEMPTS and invalidates OTP after too many failures', async () => {
   const phone = '9123456789';
-  const correctOtp = generateOtpForPhone(phone);
+  const correctOtp = await generateOtpForPhone(phone);
 
   assert.equal(MAX_OTP_ATTEMPTS, 5);
 
   // 1st through 4th incorrect attempts fail
   for (let attempt = 1; attempt < MAX_OTP_ATTEMPTS; attempt += 1) {
-    const ok = verifyOtpForPhone(phone, '000000');
+    const ok = await verifyOtpForPhone(phone, '000000');
     assert.equal(ok, false, `Attempt ${attempt} should fail`);
   }
 
   // 5th incorrect attempt reaches MAX_OTP_ATTEMPTS and deletes the OTP
-  const fifthAttempt = verifyOtpForPhone(phone, '000000');
+  const fifthAttempt = await verifyOtpForPhone(phone, '000000');
   assert.equal(fifthAttempt, false);
 
   // Now even providing the CORRECT OTP must fail because the OTP record was purged
-  const attemptWithCorrectOtp = verifyOtpForPhone(phone, correctOtp);
+  const attemptWithCorrectOtp = await verifyOtpForPhone(phone, correctOtp);
   assert.equal(attemptWithCorrectOtp, false, 'Correct OTP should fail after exceeding max attempts');
 });
 
-test('FIX 19: Successful OTP verification invalidates the OTP immediately', () => {
+test('FIX 19: Successful OTP verification invalidates the OTP immediately', async () => {
   const phone = '9811122233';
-  const correctOtp = generateOtpForPhone(phone);
+  const correctOtp = await generateOtpForPhone(phone);
 
-  const firstAttempt = verifyOtpForPhone(phone, correctOtp);
+  const firstAttempt = await verifyOtpForPhone(phone, correctOtp);
   assert.equal(firstAttempt, true);
 
-  const reuseAttempt = verifyOtpForPhone(phone, correctOtp);
+  const reuseAttempt = await verifyOtpForPhone(phone, correctOtp);
   assert.equal(reuseAttempt, false);
 });
 
-test('FIX 19: Malformed or non-string phone number fails OTP verification safely', () => {
-  assert.equal(verifyOtpForPhone(null, '123456'), false);
-  assert.equal(verifyOtpForPhone('', '123456'), false);
-  assert.equal(verifyOtpForPhone('anonymous', '123456'), false);
+test('FIX 19: Malformed or non-string phone number fails OTP verification safely', async () => {
+  assert.equal(await verifyOtpForPhone(null, '123456'), false);
+  assert.equal(await verifyOtpForPhone('', '123456'), false);
+  assert.equal(await verifyOtpForPhone('anonymous', '123456'), false);
 });
 
 // --------------------------------------------------------------------------

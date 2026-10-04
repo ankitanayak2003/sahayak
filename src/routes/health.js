@@ -56,7 +56,19 @@ async function healthReadyHandler(req, res) {
     logger.warn(`Health readiness database check failed: ${error.message}`);
   }
 
-  const isRedisReady = redisClient && redisClient.status === 'ready';
+  let isRedisReady = false;
+  if (redisClient && redisClient.status === 'ready' && !redisClient.isStub && typeof redisClient.ping === 'function') {
+    try {
+      const pong = await redisClient.ping();
+      if (pong === 'PONG') {
+        isRedisReady = true;
+      }
+    } catch (err) {
+      isRedisReady = false;
+      logger.warn(`Health readiness Redis ping failed: ${err.message}`);
+    }
+  }
+
   const isRedisRequired = env.REDIS_REQUIRED === true;
 
   if (isRedisReady) {
@@ -95,7 +107,17 @@ async function legacyHealthHandler(req, res) {
     databaseStatus = STATUS.UNAVAILABLE;
   }
 
-  const redisStatus = redisClient && redisClient.status === 'ready' ? STATUS.OK : STATUS.DISCONNECTED;
+  let redisStatus = STATUS.DISCONNECTED;
+  if (redisClient && redisClient.status === 'ready' && !redisClient.isStub && typeof redisClient.ping === 'function') {
+    try {
+      const pong = await redisClient.ping();
+      if (pong === 'PONG') {
+        redisStatus = STATUS.OK;
+      }
+    } catch {
+      redisStatus = STATUS.DISCONNECTED;
+    }
+  }
 
   return success(res, 200, {
     application: STATUS.OK,

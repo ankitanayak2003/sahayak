@@ -1,118 +1,130 @@
-# Sahayak Backend
+# Sahayak (सहायक) — Intelligent Emergency Assistance & Coordination Platform
 
-Backend for the Sahayak project. Built incrementally, stage by stage.
+[![CI Backend Tests](https://img.shields.io/badge/Tests-165%20Passing-brightgreen.svg)](#testing)
+[![Frontend](https://img.shields.io/badge/Frontend-React%2019%20%7C%20Vite-blue.svg)](#frontend-setup)
+[![Backend](https://img.shields.io/badge/Backend-Node.js%2020%20%7C%20Express-green.svg)](#backend-setup)
+[![Database](https://img.shields.io/badge/Database-MongoDB%20Atlas%20%7C%20Redis-red.svg)](#database--cache)
 
-## Stage 2A - Authentication database foundation
+**Sahayak** is an intelligent, multi-channel emergency assistance coordination platform designed to protect senior citizens and individuals in distress. It unifies one-click citizen web SOS, regional language voice AI telephony, interactive GPS mapping, automated volunteer dispatch, and distributed security controls into an enterprise emergency response workflow.
 
-Stage 2A adds the `users` table only. It does not add authentication, password
-hashing, login, registration, tokens, or authorization middleware.
+---
 
-There is no migration runner yet. Execute the migration from the project root
-with PostgreSQL's `psql` command:
+## 🌟 Key Capabilities
 
-```powershell
-psql "$env:DATABASE_URL" -f src/database/migrations/005_create_users_table.sql
-```
+* **Instant Citizen SOS**: One-click browser emergency intake with optional browser GPS coordinates, address fallback, and voice description.
+* **Interactive Incident Maps**: Dynamic Leaflet + OpenStreetMap maps featuring real-time pulse beacons, GPS accuracy radius overlays, and Google Maps driving navigation routing with zero external API key requirements.
+* **AI Urgency Classification**: Incident severity analysis and disposition assessment powered by Google Gemini AI.
+* **Deterministic Volunteer Dispatch**: Automated workload-balanced dispatch engine matching incidents to verified, available volunteers, with automated queue management when responders are busy.
+* **Distributed Security & Anti-Abuse**:
+  * Redis-backed OTP storage using HMAC-SHA256 keyed hashes with atomic Lua script single-use invalidation and 5-attempt brute-force lockout.
+  * Distributed rate-limiting middleware protecting citizen SOS intake, volunteer OTP dispatch, and authentication endpoints.
+  * Insecure Direct Object Reference (IDOR) protection on sensitive location coordinates.
+  * Authenticated AES-256-GCM phone encryption with HMAC-SHA256 blind indexing.
+* **Voice & Telephony Integration**: PSTN voice intake via Exotel, Sarvam AI regional language STT/TTS, and LiveKit Cloud conversational voice agent workers.
 
-To verify that the table exists and inspect its columns:
+---
 
-```powershell
-psql "$env:DATABASE_URL" -c "\d users"
-```
-
-The migration uses PostgreSQL's `pgcrypto` extension for UUID generation. Phone
-numbers are prepared for future encryption as `phone_number_encrypted` (`BYTEA`)
-and `phone_number_blind_index` (a unique HMAC-SHA256 hex value); no plaintext
-phone-number column is created.
-
-## Stage 1 - Scope
-
-This stage sets up only the project skeleton:
-
-- Express server (`app.js` for config, `server.js` to start it)
-- Environment variable loading + validation
-- PostgreSQL and Redis client setup (non-blocking: server still starts if either is down)
-- `GET /api/v1/health` endpoint
-- Centralized error handling + 404 handler
-- Postman environment file
-
-No authentication, encryption, DTMF, or database tables are implemented yet - those come in later stages.
-
-## Setup
-
-1. Install dependencies:
-   ```
-   npm install
-   ```
-
-2. Create your `.env` file from the template:
-   ```
-   cp .env.example .env
-   ```
-   Then edit `.env` with your local PostgreSQL/Redis connection details.
-
-3. Start the server in development mode (auto-restarts on file changes):
-   ```
-   npm run dev
-   ```
-
-   Or start it normally:
-   ```
-   npm start
-   ```
-
-The server will start on the port set in `.env` (default `5000`), even if PostgreSQL or Redis aren't running locally.
-
-## Testing the health endpoint
-
-Import `postman/Sahayak.postman_environment.json` into Postman, then send:
+## 🏗️ Architecture
 
 ```
-GET {{baseUrl}}/health
+                       +---------------------------------------+
+                       |   Vercel Global Edge Network          |
+                       |   (React 19 + TypeScript + Vite)      |
+                       |   Root Directory: 'fornent end'       |
+                       +-------------------+-------------------+
+                                           |
+                                           | HTTPS / REST API
+                                           v
++------------------------+  HTTPS / WSS   +-----------------------------------+
+| Exotel PSTN Telephony  | -------------> | Sahayak Backend Service           |
+| (Carrier Inbound Calls)| <------------- | (Node.js 20 Express Monolith)     |
++------------------------+                +-----------------+-----------------+
+                                                            |
+                       +------------------------------------+------------------------------------+
+                       |                                    |                                    |
+                       v                                    v                                    v
+        +------------------------------+     +------------------------------+     +------------------------------+
+        | MongoDB Atlas                |     | Redis 7 / Upstash            |     | LiveKit Cloud + Gemini AI    |
+        | (Primary Database)         |     | (Distributed State)          |     | (Conversational Voice Agent) |
+        +------------------------------+     +------------------------------+     +------------------------------+
 ```
 
-Expected response:
-```json
-{
-  "success": true,
-  "data": {
-    "application": "ok",
-    "server": "ok",
-    "database": "connected",
-    "redis": "ok",
-    "timestamp": "2026-09-18T10:00:00.000Z"
-  }
-}
+---
+
+## 🚀 Quickstart & Setup
+
+### Prerequisites
+* **Node.js**: v20+ LTS
+* **MongoDB**: MongoDB Atlas URI or local instance
+* **Redis**: Redis 6+ / 7+ (or Upstash Redis URL)
+
+### 1. Backend Setup
+```bash
+# Clone the repository
+git clone https://github.com/ankitanayak2003/sahayak.git
+cd sahayak
+
+# Install dependencies
+npm install
+
+# Configure environment variables
+cp .env.example .env
+# Edit .env with your MongoDB, JWT, and Redis connection details
+
+# Start backend in development mode
+npm run dev
+```
+The backend starts on `http://localhost:5000` with API routes mounted at `/api/v1`.
+
+### 2. Frontend Setup
+```bash
+# Navigate to frontend directory
+cd "fornent end"
+
+# Install dependencies
+npm install
+
+# Configure environment variables
+cp .env.example .env
+# Default points to http://localhost:5000/api/v1
+
+# Start frontend development server
+npm run dev
+```
+The frontend is available at `http://localhost:3000`.
+
+---
+
+## 🧪 Testing
+
+The repository includes a comprehensive automated test suite with zero external test runner dependencies (using Node.js's native `node --test`):
+
+```bash
+# Run backend test suite (165 tests)
+npm test
+
+# Run frontend TypeScript & lint check
+cd "fornent end"
+npm run lint
+
+# Build frontend production bundle
+npm run build
 ```
 
-If Redis is not running, `redis` will show `"disconnected"` instead — the request will still return HTTP 200.
+---
 
-## Sarvam Hosted Voice Agent Architecture
+## 📖 Detailed Documentation
 
-Sahayak uses the **Sarvam hosted Voice Agent** as the complete voice layer:
-- **Exotel** routes caller telephony directly to the Sarvam hosted Voice Agent channel:
-  `https://apps.sarvam.ai/api/app-runtime/channels/exotel`
-- **Sarvam** manages real-time Speech-to-Text (STT), conversational AI (LLM), and Text-to-Speech (TTS) in the cloud.
-- Once the emergency details are collected from the caller, the Sarvam Voice Agent executes a tool/action that calls the Sahayak webhook:
-  `POST /api/v1/sarvam/emergency`
-- **Sahayak backend** validates the payload, runs Gemini classification, and invokes `requestService` to persist the request in MongoDB and manage volunteer dispatch / 112 escalation.
+Comprehensive documentation is available in the [`docs/`](./docs) directory:
+* [**Product Requirements Document (PRD)**](./docs/prd.md): Target users, workflows, and core feature specifications.
+* [**System Architecture**](./docs/architecture.md): Data schemas, API specifications, voice pipelines, and dispatch engine.
+* [**Project Rules & Security**](./docs/rules.md): Coding conventions, encryption standards, and operational guidelines.
+* [**Task Tracking & Roadmap**](./docs/tasks.md): Verified completed phases, outstanding work, and milestones.
+* [**Durable Context & Memory**](./docs/memory.md): Key decisions, Git branches, and developer reference.
+* [**Production Deployment Guide**](./deploy/DEPLOYMENT.md): Step-by-step instructions for deploying to Vercel and Docker/Render.
 
-### Emergency Webhook Contract (`POST /api/v1/sarvam/emergency`)
-- **Headers**:
-  `Authorization: Bearer <SARVAM_TOOL_SHARED_SECRET>`
-  `Content-Type: application/json`
-- **Body**:
-  ```json
-  {
-    "caller_phone": "+919876543210",
-    "interaction_id": "sarvam-interaction-uuid",
-    "emergency_type": "medical",
-    "location": "Sector 4, Main Market, Delhi",
-    "description": "Caller fell and requires urgent medical assistance.",
-    "severity": "high"
-  }
-  ```
+---
 
-## Project structure
+## 📄 License
 
-See `src/` for the modular layout: `config/` (env, DB, Redis, constants), `database/` (connection helpers), `middleware/` (error handling), `routes/`, `utils/`.
+ISC License.
