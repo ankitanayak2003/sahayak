@@ -6,11 +6,14 @@ const { generateAccessToken } = require('../utils/jwt');
 const { generateRefreshToken, hashRefreshToken } = require('../utils/refreshToken');
 const { getDB, startMongoSession } = require('../config/mongodb');
 const { createPhoneBlindIndex, encryptPhoneNumber, normalizePhoneNumber } = require('../utils/phoneSecurity');
+const { verifyOtpForPhone } = require('../utils/otpService');
+const { loginRateLimiter } = require('../middleware/rateLimiter');
 const { ROLES } = require('../config/constants');
 
 const router = express.Router();
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const INVALID_REFRESH_TOKEN_CODE = 'INVALID_REFRESH_TOKEN';
+const DUMMY_PASSWORD_HASH = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -30,7 +33,11 @@ function normalizeAndValidatePhone(phoneNumber) {
 router.post(
   '/register',
   asyncHandler(async (req, res) => {
-    const { name, email, phone_number: phoneNumber, password, role } = req.body || {};
+    const { name, email, phone_number: phoneNumber, password, otp, role } = req.body || {};
+
+    if (role && role !== ROLES.VOLUNTEER) {
+      return error(res, 400, 'Public registration only supports volunteer accounts.');
+    }
 
     if (typeof name !== 'string' || !name.trim()) {
       return error(res, 400, 'Name is required.');
@@ -44,8 +51,11 @@ router.post(
     if (typeof password !== 'string' || !password) {
       return error(res, 400, 'Password is required.');
     }
-    if (role !== ROLES.VOLUNTEER && role !== ROLES.POLICE_ADMIN) {
-      return error(res, 400, 'Role is invalid.');
+    if (password.length < 8) {
+      return error(res, 400, 'Password must be at least 8 characters long.');
+    }
+    if (typeof otp !== 'string' || !/^\d{6}$/.test(otp.trim())) {
+      return error(res, 400, 'OTP is required and must be 6 digits.');
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -56,6 +66,11 @@ router.post(
     const normalizedPhone = normalizeAndValidatePhone(phoneNumber);
     if (!normalizedPhone) {
       return error(res, 400, 'Phone number is invalid.');
+    }
+
+    const otpValid = await verifyOtpForPhone(normalizedPhone, otp.trim());
+    if (!otpValid) {
+      return error(res, 400, 'OTP verification failed or expired.');
     }
 
     const users = getDB().collection('users');
@@ -79,14 +94,21 @@ router.post(
       phone_number_encrypted: encryptPhoneNumber(normalizedPhone),
       phone_number_blind_index: phoneBlindIndex,
       password_hash: await hashPassword(password),
-      role,
-      account_status: 'active',
+      role: ROLES.VOLUNTEER,
+      account_status: 'pending',
       created_at: now,
       updated_at: now,
     };
 
     try {
       const result = await users.insertOne(userDocument);
+      await getDB().collection('volunteers').insertOne({
+        user_id: result.insertedId,
+        verification_status: 'pending',
+        is_available: false,
+        created_at: now,
+        updated_at: now,
+      });
 
       return success(res, 201, {
         userId: result.insertedId,
@@ -95,7 +117,7 @@ router.post(
         phone_number: normalizedPhone,
         role: userDocument.role,
         account_status: userDocument.account_status,
-        message: 'Registration successful.',
+        message: 'Registration submitted for verification.',
       });
     } catch (insertError) {
       if (insertError && insertError.code === 11000) {
@@ -109,6 +131,7 @@ router.post(
 
 router.post(
   '/login',
+  loginRateLimiter,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body || {};
 
@@ -127,8 +150,19 @@ router.post(
 
     const users = getDB().collection('users');
     const user = await users.findOne({ email: normalizedEmail });
+    const volunteerProfile = user && user.role === ROLES.VOLUNTEER
+      ? await getDB().collection('volunteers').findOne({ user_id: user._id })
+      : null;
 
-    if (!user || user.account_status !== 'active' || !(await verifyPassword(password, user.password_hash))) {
+    const hashToVerify = user?.password_hash || DUMMY_PASSWORD_HASH;
+    let passwordMatch = false;
+    try {
+      passwordMatch = await verifyPassword(password, hashToVerify);
+    } catch {
+      passwordMatch = false;
+    }
+
+    if (!user || user.account_status !== 'active' || (user.role === ROLES.VOLUNTEER && volunteerProfile?.verification_status !== 'verified') || !passwordMatch) {
       return error(res, 401, 'Invalid email or password.');
     }
 
@@ -153,12 +187,125 @@ router.post(
       email: user.email,
       role: user.role,
       account_status: user.account_status,
+      volunteerId: volunteerProfile?._id || undefined,
       accessToken,
       refreshToken,
       message: 'Login successful.',
     });
   })
 );
+
+function isTransactionUnsupportedError(error) {
+  if (!error) return false;
+  const msg = String(error.message || '');
+  return (
+    error.code === 20 ||
+    /transaction numbers are only allowed on a replica set/i.test(msg) ||
+    /transactions are not supported/i.test(msg) ||
+    /standalone/i.test(msg) ||
+    /Cannot call withTransaction/i.test(msg)
+  );
+}
+
+async function executeRefreshRotation(db, refreshToken, session = null) {
+  const sessionOptions = session ? { session } : {};
+  const now = new Date();
+  const refreshTokens = db.collection('refresh_tokens');
+  const users = db.collection('users');
+  const tokenHash = hashRefreshToken(refreshToken);
+
+  const matchedRecord = await refreshTokens.findOne(
+    { token_hash: tokenHash },
+    sessionOptions
+  );
+
+  if (!matchedRecord) {
+    const invalidTokenError = new Error('Invalid refresh token.');
+    invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
+    throw invalidTokenError;
+  }
+
+  if (matchedRecord.revoked_at !== null) {
+    await refreshTokens.updateMany(
+      { token_family_id: matchedRecord.token_family_id },
+      {
+        $set: {
+          revoked_at: now,
+          updated_at: now,
+        },
+      },
+      sessionOptions
+    );
+    return { reuseDetected: true };
+  }
+
+  if (matchedRecord.expires_at <= now) {
+    const invalidTokenError = new Error('Invalid refresh token.');
+    invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
+    throw invalidTokenError;
+  }
+
+  const result = await refreshTokens.findOneAndUpdate(
+    {
+      token_hash: tokenHash,
+      revoked_at: null,
+      expires_at: { $gt: now },
+    },
+    {
+      $set: {
+        revoked_at: now,
+        updated_at: now,
+      },
+    },
+    {
+      ...sessionOptions,
+      returnDocument: 'before',
+    }
+  );
+  const oldRefreshToken = result?.value ?? result;
+
+  if (!oldRefreshToken) {
+    const invalidTokenError = new Error('Invalid refresh token.');
+    invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
+    throw invalidTokenError;
+  }
+
+  const user = await users.findOne(
+    { _id: oldRefreshToken.user_id },
+    sessionOptions
+  );
+
+  if (!user || user.account_status !== 'active') {
+    const invalidTokenError = new Error('Invalid refresh token.');
+    invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
+    throw invalidTokenError;
+  }
+
+  const accessToken = generateAccessToken(user);
+  const replacementRefreshToken = generateRefreshToken();
+  const replacementTokenHash = hashRefreshToken(replacementRefreshToken);
+
+  await refreshTokens.insertOne(
+    {
+      user_id: oldRefreshToken.user_id,
+      token_hash: replacementTokenHash,
+      token_family_id: oldRefreshToken.token_family_id,
+      expires_at: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
+      revoked_at: null,
+      created_at: now,
+      updated_at: now,
+    },
+    sessionOptions
+  );
+
+  return {
+    reuseDetected: false,
+    rotation: {
+      accessToken,
+      refreshToken: replacementRefreshToken,
+    },
+  };
+}
 
 router.post(
   '/refresh',
@@ -171,122 +318,38 @@ router.post(
 
     const db = getDB();
     const session = startMongoSession();
-    let rotation;
-    let reuseDetected = false;
+    let result;
 
     try {
       await session.withTransaction(async () => {
-        const now = new Date();
-        const refreshTokens = db.collection('refresh_tokens');
-        const users = db.collection('users');
-        const tokenHash = hashRefreshToken(refreshToken);
-        const matchedRecord = await refreshTokens.findOne(
-          { token_hash: tokenHash },
-          { session }
-        );
-
-        if (!matchedRecord) {
-          const invalidTokenError = new Error('Invalid refresh token.');
-          invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
-          throw invalidTokenError;
-        }
-
-        if (matchedRecord.revoked_at !== null) {
-          await refreshTokens.updateMany(
-            { token_family_id: matchedRecord.token_family_id },
-            {
-              $set: {
-                revoked_at: now,
-                updated_at: now,
-              },
-            },
-            { session }
-          );
-          reuseDetected = true;
-          return;
-        }
-
-        if (matchedRecord.expires_at <= now) {
-          const invalidTokenError = new Error('Invalid refresh token.');
-          invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
-          throw invalidTokenError;
-        }
-
-        const result = await refreshTokens.findOneAndUpdate(
-          {
-            token_hash: tokenHash,
-            revoked_at: null,
-            expires_at: { $gt: now },
-          },
-          {
-            $set: {
-              revoked_at: now,
-              updated_at: now,
-            },
-          },
-          {
-            session,
-            returnDocument: 'before',
-          }
-        );
-        const oldRefreshToken = result?.value ?? result;
-
-        if (!oldRefreshToken) {
-          const invalidTokenError = new Error('Invalid refresh token.');
-          invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
-          throw invalidTokenError;
-        }
-
-        const user = await users.findOne(
-          { _id: oldRefreshToken.user_id },
-          { session }
-        );
-
-        if (!user || user.account_status !== 'active') {
-          const invalidTokenError = new Error('Invalid refresh token.');
-          invalidTokenError.code = INVALID_REFRESH_TOKEN_CODE;
-          throw invalidTokenError;
-        }
-
-        const accessToken = generateAccessToken(user);
-        const replacementRefreshToken = generateRefreshToken();
-        const replacementTokenHash = hashRefreshToken(replacementRefreshToken);
-
-        await refreshTokens.insertOne(
-          {
-            user_id: oldRefreshToken.user_id,
-            token_hash: replacementTokenHash,
-            token_family_id: oldRefreshToken.token_family_id,
-            expires_at: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
-            revoked_at: null,
-            created_at: now,
-            updated_at: now,
-          },
-          { session }
-        );
-
-        rotation = {
-          accessToken,
-          refreshToken: replacementRefreshToken,
-        };
+        result = await executeRefreshRotation(db, refreshToken, session);
       });
     } catch (refreshError) {
-      if (refreshError.code === INVALID_REFRESH_TOKEN_CODE) {
+      if (isTransactionUnsupportedError(refreshError)) {
+        try {
+          result = await executeRefreshRotation(db, refreshToken, null);
+        } catch (fallbackError) {
+          if (fallbackError.code === INVALID_REFRESH_TOKEN_CODE) {
+            return error(res, 401, 'Invalid refresh token.');
+          }
+          return error(res, 500, 'Unable to refresh token.');
+        }
+      } else if (refreshError.code === INVALID_REFRESH_TOKEN_CODE) {
         return error(res, 401, 'Invalid refresh token.');
+      } else {
+        return error(res, 500, 'Unable to refresh token.');
       }
-
-      return error(res, 500, 'Unable to refresh token.');
     } finally {
       await session.endSession();
     }
 
-    if (reuseDetected) {
+    if (!result || result.reuseDetected) {
       return error(res, 401, 'Invalid refresh token.');
     }
 
     return success(res, 200, {
-      accessToken: rotation.accessToken,
-      refreshToken: rotation.refreshToken,
+      accessToken: result.rotation.accessToken,
+      refreshToken: result.rotation.refreshToken,
       message: 'Token refreshed successfully.',
     });
   })

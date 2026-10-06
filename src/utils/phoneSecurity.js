@@ -123,8 +123,22 @@ function createPhoneBlindIndex(phoneNumber) {
     .digest(BINARY_ENCODING);
 }
 
+function isValidPhone(phoneNumber) {
+  if (typeof phoneNumber !== 'string') {
+    return false;
+  }
+
+  try {
+    const normalized = normalizePhoneNumber(phoneNumber);
+    return normalized.length >= 10 && normalized.length <= 15;
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   normalizePhoneNumber,
+  isValidPhone,
   encryptPhoneNumber,
   decryptPhoneNumber,
   createPhoneBlindIndex,

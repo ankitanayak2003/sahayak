@@ -86,7 +86,7 @@ async function verifyUsersCollection() {
 
     await assert(JSON.stringify(results.requiredFields) === JSON.stringify(['password_hash', 'role', 'account_status', 'created_at', 'updated_at']), 'Required fields do not match the expected users schema.');
     await assert(JSON.stringify(results.validRoles) === JSON.stringify(['volunteer', 'police_admin']), 'Allowed roles do not match the expected Sahayak design.');
-    await assert(JSON.stringify(results.validAccountStatuses) === JSON.stringify(['active', 'suspended', 'deleted']), 'Allowed account statuses do not match the expected Sahayak design.');
+    await assert(JSON.stringify(results.validAccountStatuses) === JSON.stringify(['pending', 'active', 'suspended', 'deleted']), 'Allowed account statuses do not match the expected Sahayak design.');
 
     const invalidRoleDoc = makeTempUser({ role: 'admin', phone_number_blind_index: 'a'.repeat(64) });
     try {
@@ -96,7 +96,7 @@ async function verifyUsersCollection() {
     }
     await assert(results.invalidRoleRejected, 'Invalid role value was accepted when it should have been rejected.');
 
-    const invalidStatusDoc = makeTempUser({ account_status: 'pending', phone_number_blind_index: 'b'.repeat(64) });
+    const invalidStatusDoc = makeTempUser({ account_status: 'invalid', phone_number_blind_index: 'b'.repeat(64) });
     try {
       await usersCollection.insertOne(invalidStatusDoc);
     } catch (error) {

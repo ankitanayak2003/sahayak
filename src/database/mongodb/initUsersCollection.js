@@ -37,7 +37,7 @@ const usersValidator = {
       },
       account_status: {
         bsonType: 'string',
-        enum: ['active', 'suspended', 'deleted'],
+        enum: ['pending', 'active', 'suspended', 'deleted'],
       },
       created_at: {
         bsonType: 'date',

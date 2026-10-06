@@ -2,27 +2,15 @@ const express = require('express');
 const asyncHandler = require('../utils/asyncHandler');
 const { success, error } = require('../utils/apiResponse');
 const { hashPassword } = require('../utils/password');
-const { createPhoneBlindIndex, encryptPhoneNumber, normalizePhoneNumber } = require('../utils/phoneSecurity');
+const { createPhoneBlindIndex, encryptPhoneNumber, normalizePhoneNumber, isValidPhone } = require('../utils/phoneSecurity');
 const { generateOtpForPhone, verifyOtpForPhone } = require('../utils/otpService');
+const { sendOtpRateLimiter } = require('../middleware/rateLimiter');
 const { getDB } = require('../config/mongodb');
 
 const router = express.Router();
 
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
-function isValidPhone(phoneNumber) {
-  if (typeof phoneNumber !== 'string') {
-    return false;
-  }
-
-  try {
-    const normalized = normalizePhoneNumber(phoneNumber);
-    return normalized.length >= 10 && normalized.length <= 15;
-  } catch (error) {
-    return false;
-  }
 }
 
 function isValidOtp(otp) {
@@ -86,7 +74,7 @@ router.post(
       return error(res, 409, 'A user with this email already exists.');
     }
 
-    const otpValid = verifyOtpForPhone(normalizedPhone, otp);
+    const otpValid = await verifyOtpForPhone(normalizedPhone, otp);
     if (!otpValid) {
       return error(res, 400, 'OTP verification failed or expired.');
     }
@@ -102,20 +90,27 @@ router.post(
       email: normalizedEmail,
       password_hash: passwordHash,
       role: 'volunteer',
-      account_status: 'active',
+      account_status: 'pending',
       created_at: now,
       updated_at: now,
     };
 
     try {
       const result = await users.insertOne(userDoc);
+      await db.collection('volunteers').insertOne({
+        user_id: result.insertedId,
+        verification_status: 'pending',
+        is_available: false,
+        created_at: now,
+        updated_at: now,
+      });
 
       return success(res, 201, {
         success: true,
-        message: 'Volunteer registration successful.',
+        message: 'Volunteer registration submitted for verification.',
         userId: result.insertedId,
         role: 'volunteer',
-        account_status: 'active',
+        account_status: 'pending',
       });
     } catch (error) {
       if (error && error.code === 11000) {
@@ -127,31 +122,27 @@ router.post(
   })
 );
 
-router.post(
-  '/generate-otp',
-  asyncHandler(async (req, res) => {
-    if (process.env.NODE_ENV === 'production') {
-      return error(res, 404, 'Route not available in production.');
-    }
+const handleOtpGeneration = asyncHandler(async (req, res) => {
+  const { phone_number } = req.body || {};
 
-    const { phone_number } = req.body || {};
+  if (!phone_number) {
+    return error(res, 400, 'Phone number is required.');
+  }
 
-    if (!phone_number) {
-      return error(res, 400, 'Phone number is required.');
-    }
+  if (!isValidPhone(phone_number)) {
+    return error(res, 400, 'Phone number is invalid.');
+  }
 
-    if (!isValidPhone(phone_number)) {
-      return error(res, 400, 'Phone number is invalid.');
-    }
+  const otp = await generateOtpForPhone(phone_number);
 
-    const otp = generateOtpForPhone(phone_number);
+  return success(res, 200, {
+    message: 'OTP generated successfully.',
+    otp,
+    expiresInSeconds: 300,
+  });
+});
 
-    return success(res, 200, {
-      message: 'OTP generated successfully for development testing.',
-      otp,
-      expiresInSeconds: 300,
-    });
-  })
-);
+router.post('/generate-otp', sendOtpRateLimiter, handleOtpGeneration);
+router.post('/send-otp', sendOtpRateLimiter, handleOtpGeneration);
 
 module.exports = router;
