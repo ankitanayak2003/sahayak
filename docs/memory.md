@@ -1,81 +1,84 @@
-# Sahayak — Durable Context & Project Memory
+﻿# Sahayak (सहायक) — Developer Memory & Project Context
 
-## 1. Project Identity & Branches
+## 1. Project Overview & Identity
 
-* **Project Name**: Sahayak (Emergency Assistance & Volunteer Coordination Platform)
-* **Workspace Path**: `C:\Users\ankita\Desktop\sahayak-final`
-* **Active Working Branch**: `feature/phase-3-redis-security`
-* **Baseline Backup Branch**: `backup/phase-1-2-baseline` (Commit: `6ec6a1b2ec7e6e028ce8c3459db6f80dd67803ac`)
+* **Product**: Sahayak (सहायक — "Helper/Assistant")
+* **Purpose**: Multi-channel emergency assistance and volunteer coordination platform connecting senior citizens and individuals in distress with police dispatchers and verified community volunteers.
+* **Workspace Root**: `c:\Users\ankita\Desktop\sahayak-final`
+* **Current Working Branch**: `feature/phase-3-redis-security`
+* **Immutable Baseline Branch**: `backup/phase-1-2-baseline` (Do NOT modify or delete)
 * **Remote Repository**: `https://github.com/ankitanayak2003/sahayak.git`
+* **Current Project Status**: Current demo scope: COMPLETE. 165 backend tests passing, frontend lint/build clean.
 
 ---
 
-## 2. Key Decisions & Rationale
+## 2. Core Architecture & Tech Choices
 
-1. **MongoDB Atlas for Operational Data**:
-   * Selected for flexible emergency incident schemas, rapid ingestion of varied telemetry sources (browser GPS, text, telephony), and native GeoJSON `2dsphere` geospatial spatial indexing.
-2. **Redis for Security Primitives**:
-   * Plaintext OTPs are replaced with keyed HMAC-SHA256 hashes stored in Redis.
-   * Atomic Lua script execution eliminates race-condition brute-force attacks against the 5-attempt limit.
-   * Distributed rate limiting uses atomic Redis Lua counters. In production, security fails closed (HTTP 503) rather than degrading silently.
-3. **Dual-Mode Adapter for Test Portability**:
-   * While production strictly mandates Redis, an in-memory fallback adapter is available for offline development and local test suites so `npm test` runs with zero external daemon requirements.
-4. **Leaflet + OpenStreetMap (OSM) for Incident Maps**:
-   * Adopted to eliminate third-party API key exposure in client bundles and avoid per-request mapping fees.
-   * Component `<IncidentMap />` provides dynamic animated pulse beacons, accuracy circles, and one-click Google Maps driving navigation routing.
-5. **Decoupled Deployment Architecture**:
-   * Frontend: Stateless React 19 SPA deployed to Vercel (Root: `fornent end`).
-   * Backend: Monolithic Express application deployed to persistent container (Docker / Render / Railway / AWS ECS) to support long-lived telephony WebSockets and voice worker streams.
-
----
-
-## 3. Key Directory & File Paths
-
-| File / Directory | Purpose |
-| :--- | :--- |
-| `fornent end/` | React 19 + TypeScript + Vite frontend application |
-| `fornent end/src/components/IncidentMap.tsx` | Reusable Leaflet map component with live beacon & accuracy radius |
-| `fornent end/src/services/api.ts` | Frontend API client with JWT auto-refresh and auth token management |
-| `fornent end/vercel.json` | Vercel SPA routing and clean URL configuration |
-| `src/server.js` | Express HTTP server entrypoint, WebSocket gateway, graceful shutdown |
-| `src/config/env.js` | Single source of truth for environment variable loading and validation |
-| `src/config/redis.js` | Shared ioredis client with exponential retry and test stream unref |
-| `src/middleware/rateLimiter.js` | Distributed Redis rate-limiting middleware with atomic Lua script |
-| `src/utils/otpService.js` | Redis-backed OTP generation and atomic Lua verification service |
-| `src/utils/phoneSecurity.js` | AES-256-GCM phone encryption, HMAC blind index, phone validation |
-| `src/utils/locationValidation.js`| Central WGS84 coordinate and accuracy radius validation logic |
-| `src/services/volunteerAssignmentService.js` | Deterministic volunteer dispatch and queue balancing engine |
-| `test/` | 17 test suites executed via native Node.js test runner (`node --test`) |
-| `docs/` | Project documentation: PRD, Architecture, Rules, Tasks, Memory |
+1. **Frontend (`fornent end/`)**:
+   - React 19 + TypeScript + Vite + Tailwind CSS v4.
+   - Single Page Application (SPA) with centralized state in `AppContext.tsx`.
+   - Leaflet 1.9.4 + OpenStreetMap standard raster tiles for interactive incident maps (`IncidentMap.tsx`). Eliminates external Google Maps API key leaks and per-request tile charges.
+   - Deploys statelessly to Vercel with clean URL rewrites in `fornent end/vercel.json`.
+2. **Backend (`src/`)**:
+   - Monolithic Express service on Node.js 20+ LTS (CommonJS).
+   - Must be hosted on a persistent container or VM (Docker, Render, Railway, AWS ECS) because it manages persistent WebSocket connections (`/ws`) for telephony audio streaming. Do not deploy backend as Vercel serverless functions.
+   - Single source of truth for environment variables: `src/config/env.js`.
+3. **Database & Cache**:
+   - **MongoDB Atlas**: Primary operational database storing users, volunteers, emergency requests, audit histories, and refresh tokens. Uses `2dsphere` index on GeoJSON Point `location_geojson`.
+   - **Redis 7**: Distributed cache, keyed HMAC-SHA256 OTP storage, and atomic Lua-based distributed rate limiting.
+4. **Voice & Telephony Integrations**:
+   - Exotel PSTN gateway via WebSocket `/ws` (8kHz PCM audio).
+   - Sarvam AI streaming regional language STT (`saaras:v3`) and TTS (`bulbul:v3`) with tool webhook at `POST /api/v1/sarvam/emergency`.
+   - LiveKit Cloud conversational agent background worker (`src/agents/livekit/agent.js`).
+   - Note: Carrier SIP trunk routing is out of scope.
 
 ---
 
-## 4. Operational & Verification Commands
+## 3. Key Security & Workflow Decisions
+
+1. **Keyed HMAC-SHA256 OTP Storage**:
+   - Plaintext OTPs are never stored in Redis or MongoDB.
+   - Stored as HMAC-SHA256 keyed hashes with 5-minute TTL.
+   - Atomic verification via Redis Lua script (`VERIFY_OTP_LUA`): single-use invalidation upon success; strict lockout and key deletion after 5 failed attempts.
+2. **Distributed Rate Limiting**:
+   - Atomic Redis Lua script fixed-window limiter on public routes (`/requests/citizen`, `/volunteers/send-otp`, `/auth/login`).
+   - Uses `TRUST_PROXY` to derive genuine client IP from `req.ip`.
+   - **Fail-Closed Principle**: In production (`NODE_ENV === 'production'`) or when `REDIS_REQUIRED=true`, the service returns HTTP 503 if Redis is unreachable. Never silently downgrade security controls in production.
+3. **PII Encryption & Blind Indexing**:
+   - Phone numbers are encrypted using authenticated AES-256-GCM (`phone_number_encrypted`).
+   - Queries use deterministic HMAC-SHA256 blind indexing (`phone_number_blind_index`).
+   - `PHONE_ENCRYPTION_KEY` and `PHONE_BLIND_INDEX_SECRET` must be separate secrets.
+4. **Location Privacy & IDOR Protection**:
+   - Coordinates are sensitive PII. Unauthenticated requests cannot read coordinates.
+   - Volunteers can only read coordinates of incidents assigned to them.
+5. **Deterministic Volunteer Dispatch**:
+   - Volunteers must be `verification_status === 'verified'` and `is_available === true`.
+   - Ranked by active uncompleted assignments (least busy first), tie-broken by earliest registration.
+   - If all volunteers are occupied, requests are queued with `queue_position`.
+
+---
+
+## 4. Invariants — Things Future Developers Must NOT Change
+
+* **DO NOT modify `backup/phase-1-2-baseline`**: This branch must remain untouched.
+* **DO NOT commit `.env` files**: All secrets must stay excluded by `.gitignore`.
+* **DO NOT put backend credentials in `VITE_*` variables**: The browser must only receive `VITE_API_BASE_URL`.
+* **DO NOT silently downgrade Redis in production**: If Redis is down in production, fail closed with HTTP 503.
+* **DO NOT weaken or delete security tests**: All 165 backend tests must remain green.
+* **DO NOT deploy backend as serverless functions**: Telephony WebSockets require a persistent container process.
+* **DO NOT bypass `ALLOWED_TRANSITIONS`**: State machine validation must remain strict.
+
+---
+
+## 5. Verification Commands
 
 ```bash
-# 1. Run complete backend test suite (165 tests)
+# Backend test suite (165 passing tests)
 npm test
 
-# 2. Run frontend TypeScript / lint checks
-cd "fornent end"
-npm run lint
+# Frontend TypeScript lint check
+cd "fornent end" && npm run lint
 
-# 3. Build frontend production bundle
-npm run build
-
-# 4. Start backend in development mode
-npm run dev
-
-# 5. Start frontend development server
-npm run dev # within "fornent end"
+# Frontend production build
+cd "fornent end" && npm run build
 ```
-
----
-
-## 5. Constraints & Invariants for Future Work
-
-* **Never edit or delete `backup/phase-1-2-baseline`**.
-* **Never commit `.env` or `.env.local` files**; ensure all secrets remain excluded.
-* **Never expose backend credentials in `VITE_` variables**.
-* **Do not convert the backend to Vercel serverless functions**; persistent Node.js processes are required for telephony WebSockets and LiveKit voice streaming.
-* **Preserve the 165 backend tests**; any new features must include corresponding unit and integration tests.
